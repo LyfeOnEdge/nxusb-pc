@@ -10,7 +10,6 @@ from enum import Enum
 SWITCH_VENDOR_ID = 0x057E
 SWITCH_PRODUCT_ID = 0x3000
 
-
 class UsbMode(Enum):
 	UsbMode_Exit                    = 0x0
 	UsbMode_Ping                    = 0x1
@@ -88,22 +87,38 @@ class usb_tool:
 		self.in_ep = None
 		self.is_connected = False
 
-		self.read_buf = io.BytesIO()
-		self.write_buf = io.BytesIO()
+		#Not used yet
+		# self.read_buf = io.BytesIO()
+		# self.write_buf = io.BytesIO()
+
+
+	def stop(self):
+		pass
+
+	def send(self):
+		pass
+
+	def read(self):
+		pass
+
+
+
+
+
+
 
 	def init(self):
 		print("Starting Switch connection")
-		if self.wait_for_switch_to_connect(silent = True):
+		if self.wait_for_switch_to_connect(silent = True): #Populates self.dev when the switch is connected
 			try:
 				dev = self.dev
 				dev.reset()
 				dev.set_configuration()
 				cfg = dev.get_active_configuration()
 
-				is_out_ep = lambda ep: usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_OUT
-				is_in_ep = lambda ep: usb.util.endpoint_direction(ep.bEndpointAddress) == usb.util.ENDPOINT_IN
-				out_ep = usb.util.find_descriptor(cfg[(0,0)], custom_match=is_out_ep)
-				in_ep = usb.util.find_descriptor(cfg[(0,0)], custom_match=is_in_ep)
+				ep = self.get_endpoints(cfg)
+				out_ep = ep[1]
+				in_ep = ep[0]
 
 				assert out_ep is not None
 				assert in_ep is not None
@@ -117,12 +132,16 @@ class usb_tool:
 			print("Can't init switch connection")
 
 	def clear(self):
+		print("Buffers cleared")
 		self.read_buf = io.BytesIO()
 		self.write_buf = io.BytesIO()
 
 	def test(self):
-		ping_in = self.in_ep.read(0x10, timeout=0)
+		print("\n\nRunning test")
 		try:
+			print("Getting data")
+			ping_in = self.in_ep.read(0x10, timeout=0)
+			print("Unpacking struct")
 			mode = struct.unpack('<Q', ping_in[0:8])[0]
 			size = struct.unpack('<Q', ping_in[0x8:0x10])[0]
 
@@ -157,3 +176,28 @@ class usb_tool:
 		else:
 			print("Failed to find switch")
 			return False
+
+	def get_endpoints(self, cfg):
+		print("Getting endpoints")
+		print("==============================================================")
+
+		in_ep = _get_in_endpoint(cfg)
+		print("In:")
+		print(in_ep)
+
+		out_ep = _get_out_endpoint(cfg)
+		print("Out:")
+		print(out_ep)
+
+		print("==============================================================")
+		return(in_ep, out_ep)
+
+def _get_endpoint(direction, cfg):
+	is_ep = lambda ep: usb.util.endpoint_direction(ep.bEndpointAddress) == direction
+	return usb.util.find_descriptor(cfg[(0,0)], custom_match = is_ep)
+
+def _get_out_endpoint(cfg):
+	return _get_endpoint(usb.util.ENDPOINT_OUT, cfg)
+
+def _get_in_endpoint(cfg):
+	return _get_endpoint(usb.util.ENDPOINT_IN, cfg)
