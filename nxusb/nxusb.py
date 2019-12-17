@@ -325,38 +325,38 @@ class usb_tool:
 
 	#returns mode if mode was found
 	def mode_poll(self):
-	# try:
-		print("Awaiting command...")
-		io_in = self.in_ep.read(0x10, timeout=0)
-		print(io_in)
-		mode = struct.unpack('<B', io_in[0x0:0x1])[0]
-		padding = struct.unpack('<7?', io_in[0x1:0x8])[0]
-		size = struct.unpack('<Q', io_in[0x8:0x10])[0]
-
-		print("Mode: {}, Size: {}".format(mode, size))
-
-		print("Received Command {}".format(UsbMode(mode)))
-
 		try:
-			function = self.UsbModeMap[mode]
-		except Exception as e:
+			print("Awaiting command...")
+			io_in = self.in_ep.read(0x10, timeout=0)
+			print(io_in)
+			mode = struct.unpack('<B', io_in[0x0:0x1])[0]
+			padding = struct.unpack('<7?', io_in[0x1:0x8])[0]
+			size = struct.unpack('<Q', io_in[0x8:0x10])[0]
+
+			print("Mode: {}, Size: {}".format(mode, size))
+
+			print("Received Command {}".format(UsbMode(mode)))
+
 			try:
-				print("Error selecting mode: {} ~ {}".format(mode,e))
-			except:
-				print("Error selecting mode! {}".format(e))
+				function = self.UsbModeMap[mode]
+			except Exception as e:
+				try:
+					print("Error selecting mode: {} ~ {}".format(mode,e))
+				except:
+					print("Error selecting mode! {}".format(e))
 
-		# try:
-		result = function(size)
-		if not result == -1:
-			self.writeUSBReturnCode(result)
-		# except Exception as e:
-		# 	print("Error executing USB command {}, size {} ~ {}".format(UsbMode(mode), size, e))
+			# try:
+			result = function(size)
+			if not result == -1:
+				self.writeUSBReturnCode(result)
+		except Exception as e:
+			print("Error executing USB command {}, size {} ~ {}".format(UsbMode(mode), size, e))
 
-		# except Exception as e:
-		# 	print("Error while polling ~ {}".format(e))
-		# 	self._exit()
-		# 	input()
-		# 	return
+		except Exception as e:
+			print("Error while polling ~ {}".format(e))
+			self._exit()
+			input()
+			return
 
 	def _exit(self):
 		sys.exit("Exiting...")
