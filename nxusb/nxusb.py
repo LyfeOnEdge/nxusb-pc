@@ -87,6 +87,7 @@ class usb_tool:
 
 	def writeUSBReturnCode(self, code):
 		outstruct = struct.pack("<l", code)
+		print("Writing USBReturnCode {}".format(UsbReturnCode(code)))
 		self.writeUSB(outstruct)
 
 	def writeUSBReturnSuccess(self):
@@ -106,7 +107,7 @@ class usb_tool:
 
 			self.writeUSBReturnSuccess()
 
-			outstruct = struct.pack("<QBBBxxxxx", NXUSB_MAGIC, NXUSB_VERSION_MAJOR, NXUSB_VERSION_MINOR, NXUSB_VERSION_PATCH)
+			outstruct = struct.pack("<Q3B5x", NXUSB_MAGIC, NXUSB_VERSION_MAJOR, NXUSB_VERSION_MINOR, NXUSB_VERSION_PATCH)
 			self.dev.write(endpoint = self.out_ep, data = outstruct, timeout = 1000)
 
 			print("Handshake successful, switch client version {}.{}.{}".format(major, minor, macro))
@@ -175,25 +176,72 @@ class usb_tool:
 
 			status = UsbReturnCode.UsbReturnCode_Success.value
 			try:
-				self.open_file = open(path_to_open, "r")
-				print("successfully opened file")
-			except:
-				print("failed to open file")
+				self.open_file = path_to_open
+			except Exception as e:
+				print("Failed to open file ~ {}".format(e))
 				status = UsbReturnCode.UsbReturnCode_FailedOpenFile.value
 		else:
 			status = UsbReturnCode.UsbReturnCode_FailedOpenFile.value
 
 		return status
 
+	#Not tested
 	def ReadFile(self, size):
-		pass
+		io_in = self.readUSB(size)
+		if io_in:
+			read_size = struct.unpack('<Q'.format(size), io_in[0x0:0x8])[0]
+			read_offset = struct.unpack('<Q'.format(size), io_in[0x8:0x10])[0]
+			print("Read size {}".format(read_size))
+			print("Read read_offset {}".format(read_offset))
+			status = UsbReturnCode.UsbReturnCode_Success.value
 
+			with open(self.open_file, "rb") as open_file:
+				try:
+					open_file.seek(read_offset)
+					data = open_file.read(read_size)
+					print("Read data {}".format(data))
+				except Exception as e:
+					try:
+						print("Error reading file {} ~ {}".format(path_to_open, e))
+					except:
+						print("Error reading file!! {}".format(e))
+					return UsbReturnCode.UsbReturnCode_FailedOpenFile.value
+			try:
+				self.writeUSB(data)
+				print("successfully wrote contents to usb")
+			except Exception as e:
+				print("Failed to write file contents to usb ~ {}".format(e))
+				return UsbReturnCode.UsbReturnCode_FailedOpenFile.value
+		else:
+			return UsbReturnCode.UsbReturnCode_FailedOpenFile.value
+		return -1
+
+	#Not tested
 	def WriteFile(self, size):
-		pass
+		io_in = self.readUSB(size)
+		if io_in:
+			write_size = struct.unpack('<Q'.format(size), io_in[0x0:0x8])[0]
+			write_offset = struct.unpack('<Q'.format(size), io_in[0x8:0x10])[0]
+			data_in = self.readUSB(write_size)
+			bytes_in = struct.unpack('<{}b'.format(write_size))
+
+			with open(self.open_file, "w") as open_file:
+				try:
+					open_file.seek(read_offset)
+					open_file.write(bytes_in)
+					status = UsbReturnCode.UsbReturnCode_Success.value
+				except Exception as e:
+					try:
+						print("Error writing to file {} ~ {}".format(path_to_open, e))
+					except:
+						print("Error writing to file!! {}".format(e))
+					status = UsbReturnCode.UsbReturnCode_FailedOpenFile.value
+		else:
+			status = UsbReturnCode.UsbReturnCode_FailedOpenFile.value
+		return status
 
 	def CloseFile(self, size = None):
 		if self.open_file:
-			self.open_file.close()
 			self.open_file = None
 			status = UsbReturnCode.UsbReturnCode_Success.value
 		else:
@@ -216,11 +264,8 @@ class usb_tool:
 				else:
 					raise
 			else:
-				if os.path.isdir(os.path.dirname(path_to_open)):
-					with open(path_to_open, "w+"):
-						pass
-				else:
-					status = UsbReturnCode.UsbReturnCode_FailedTouchFile.value
+				with open(path_to_open, "w+"):
+					pass
 		except Exception as e:
 			try:
 				print("Failed to touch file {}".format(path_to_open, e))
@@ -251,16 +296,19 @@ class usb_tool:
 
 		return status
 
+	#IDK what I'm doing wrong
 	def RenameFile(self, size):
 		pass
 		# io_in = self.readUSB(size)
 		# print(io_in)
 		# size_1 = struct.unpack('<Q', io_in[0x0:0x8])[0]
-		# size_2 = struct.unpack('<Q', io_in[0x8:0xF])[0]
-		# string_1 = struct.unpack('<p', io_in[0xF:0xF+size_1])[0]
-		# string_2 = struct.unpack('<p', io_in[0xF+size_1:])[0]
+		# print("Size_1: {}".format(size_1))
+		# size_2 = struct.unpack('<Q', io_in[0x8:0x10])[0]
+		# print("Size_2: {}".format(size_2))
+		# string_1 = struct.unpack('<{}s'.format(size_1), io_in[0x10:0x10+size_1])[0]
+		# string_2 = struct.unpack('<{}s'.format(size_2), io_in[0x10+size_1:0x10+size_1+size_2])[0]
 		# print("Filename_1: {}, Filename_2: {}".format(string_1, string_2))
-		# self.writeUSBReturnSuccess()
+		# return UsbReturnCode.UsbReturnCode_Success.value
 
 	#Returns 0x0 on fail
 	def GetFileSize(self, size):
@@ -281,9 +329,9 @@ class usb_tool:
 				filesize = 0x0
 		except Exception as e:
 			try:
-				print("Failed to touch file {}".format(path_to_open, e))
+				print("Failed to get file size {} ~ {}".format(path_to_open, e))
 			except:
-				print("Failed to touch file!!")
+				print("Failed to get file size!! ~ {}".format(e))
 			filesize = 0x0
 
 		outstruct = struct.pack('<Q', filesize)
@@ -291,14 +339,67 @@ class usb_tool:
 		return -1 #Prevents the sending of the usb return code
 
 	def OpenDir(self, size):
-		pass
+		io_in = self.readUSB(size)
+		if io_in:
+			print(io_in)
+			path_to_open = struct.unpack('<{}s'.format(size), io_in[0x0:size])[0]
+
+		status = UsbReturnCode.UsbReturnCode_Success.value
+
+		try:
+			if os.path.exists(path_to_open):
+				if os.path.isdir(path_to_open):
+					os.chdir(path)
+				elif os.path.isfile(path_to_open):
+					status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+				else:
+					raise
+			else:
+				status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+		except Exception as e:
+			try:
+				print("Failed to open dir {} ~ {}".format(path_to_open, e))
+			except:
+				print("Failed to open dir! ~ {}".format(e))
+			status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+
+		return status
 
 	def ReadDir(self, size):
 		pass
 
 	def DeleteDir(self, size):
-		pass
+		io_in = self.readUSB(size)
+		if io_in:
+			print(io_in)
+			path_to_open = struct.unpack('<{}s'.format(size), io_in[0x0:size])[0]
 
+		status = UsbReturnCode.UsbReturnCode_Success.value
+
+		try:
+			if os.path.exists(path_to_open):
+				if os.path.isdir(path_to_open):
+					try:
+						os.rmdir(path)
+					except Exception as e:
+						print("Error deleting dir {} ~ {}".format(path, e))
+						status = UsbReturnCode.UsbReturnCode_FailedDeleteDir.value
+				elif os.path.isfile(path_to_open):
+					status = UsbReturnCode.UsbReturnCode_FailedDeleteDir.value
+				else:
+					raise
+			else:
+				status = UsbReturnCode.UsbReturnCode_FailedDeleteDir.value
+		except Exception as e:
+			try:
+				print("Failed to delete dir {} ~ {}".format(path_to_open, e))
+			except:
+				print("Failed to delete dir! ~ {}".format(e))
+			status = UsbReturnCode.UsbReturnCode_FailedDeleteDir.value
+
+		return status
+
+	#Not written yet switch-side
 	def DeleteDirRecursively(self, size):
 		pass
 
@@ -325,44 +426,49 @@ class usb_tool:
 
 	#returns mode if mode was found
 	def mode_poll(self):
+		# try:
+		print("Awaiting command...")
 		try:
-			print("Awaiting command...")
 			io_in = self.in_ep.read(0x10, timeout=0)
-			print(io_in)
-			mode = struct.unpack('<B', io_in[0x0:0x1])[0]
-			padding = struct.unpack('<7?', io_in[0x1:0x8])[0]
-			size = struct.unpack('<Q', io_in[0x8:0x10])[0]
-
-			print("Mode: {}, Size: {}".format(mode, size))
-
-			print("Received Command {}".format(UsbMode(mode)))
-
-			try:
-				function = self.UsbModeMap[mode]
-			except Exception as e:
-				try:
-					print("Error selecting mode: {} ~ {}".format(mode,e))
-				except:
-					print("Error selecting mode! {}".format(e))
-
-			# try:
-			result = function(size)
-			if not result == -1:
-				self.writeUSBReturnCode(result)
-		except Exception as e:
-			print("Error executing USB command {}, size {} ~ {}".format(UsbMode(mode), size, e))
-
-		except Exception as e:
-			print("Error while polling ~ {}".format(e))
-			self._exit()
-			input()
+		except usb.core.USBError as e:
+			print("Error polling USB (Device disconnnected?) reinitializing...")
 			return
+		print(io_in)
+		mode = struct.unpack('<B', io_in[0x0:0x1])[0]
+		padding = struct.unpack('<7?', io_in[0x1:0x8])[0]
+		size = struct.unpack('<Q', io_in[0x8:0x10])[0]
+
+		print("Mode: {}, Size: {}".format(mode, size))
+
+		print("Received Command {}".format(UsbMode(mode)))
+
+		try:
+			function = self.UsbModeMap[mode]
+		except Exception as e:
+			try:
+				print("Error selecting mode: {} ~ {}".format(mode,e))
+			except:
+				print("Error selecting mode! {}".format(e))
+
+		# try:
+		result = function(size)
+		if not result == -1:
+			self.writeUSBReturnCode(result)
+		# except Exception as e:
+		# 	print("Error executing USB command {}, size {} ~ {}".format(UsbMode(mode), size, e))
+
+		# except Exception as e:
+		# 	print("Error while polling ~ {}".format(e))
+		# 	self._exit()
+		# 	input()
+		# 	return
 
 	def _exit(self):
 		sys.exit("Exiting...")
 
 
-
+	def get_cwd(self):
+		pass
 
 
 
