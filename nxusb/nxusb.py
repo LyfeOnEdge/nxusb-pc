@@ -47,6 +47,7 @@ class usb_tool:
 			UsbMode.UsbMode_GetTotalDevices.value : self.GetTotalDevices,
 		}
 
+	#Tested
 	def init(self):
 		print("Starting Switch connection")
 		if self.wait_for_switch_to_connect(silent = True): #Populates self.dev when the switch is connected
@@ -74,8 +75,10 @@ class usb_tool:
 				return True
 			except Exception as e:
 				print("Error: Failed to init switch connection ~ {}".format(e))
+				return None
 		else:
 			print("Can't init switch connection")
+			return False
 
 	def readUSB(self, length):
 		if length:
@@ -83,28 +86,46 @@ class usb_tool:
 				return self.in_ep.read(length, timeout=0)
 			except Exception as e:
 				print("Error reading USB ~ {}".format(e))
+				return None
 		else:
-			print("Error reading USB. No read length.")
+			print("Error reading USB. Null length.")
+			return False
 
+	#Returns True if successful
 	def writeUSB(self, outstruct):
 		try:
 			if outstruct:
 				self.dev.write(endpoint = self.out_ep, data = outstruct, timeout = 1000)
+				return True
 			else:
 				print("Error writing to USB. Data is None.")
 		except Exception as e:
 			print("Error writing to USB ~ {}".format(e))
 
+	#Shortcut to write usb retrun codes
+	#Returns True if sucessful
 	def writeUSBReturnCode(self, code):
 		if code is None:
 			print("Error writing USB return code. Return code is None.")
 		outstruct = struct.pack("<l", code)
 		print("Writing USBReturnCode {}".format(UsbReturnCode(code)))
-		self.writeUSB(outstruct)
+		return self.writeUSB(outstruct)
 
+	#Shortcut to write usb success code
+	#Returns True if sucessful
 	def writeUSBReturnSuccess(self):
-		self.writeUSBReturnCode(UsbReturnCode.UsbReturnCode_Success.value)
+		return self.writeUSBReturnCode(UsbReturnCode.UsbReturnCode_Success.value)
 
+	#-------------------------------
+	#Handshake struct:
+	#The first 8 bytes are magic [0x4E58555342]
+	#Then 3 bytes for the version [Macro, micro, major]
+	#Then 5 bytes of padding
+	#----------------------------
+	#Handshake protocol
+	#The switch writes a handshake struct of length 0x10
+	#The pc writes a success code
+	#The pc writes a handshake struct
 	def attempt_handshake(self):
 		try:
 			io_in = self.in_ep.read(0x10, timeout=0)
@@ -113,10 +134,14 @@ class usb_tool:
 				print("Invalid USB Magic")
 				return False
 
-			macro = struct.unpack('<B', io_in[0x8:0x9])[0]
-			minor = struct.unpack('<B', io_in[0x9:0xA])[0]
-			major = struct.unpack('<B', io_in[0xA:0xB])[0]
-
+			status = None
+			try:
+				macro = struct.unpack('<B', io_in[0x8:0x9])[0]
+				minor = struct.unpack('<B', io_in[0x9:0xA])[0]
+				major = struct.unpack('<B', io_in[0xA:0xB])[0]
+			except Exception as e:
+				print("Handshake unpack error: {}".format(e))
+				return False
 			self.writeUSBReturnSuccess()
 
 			outstruct = struct.pack("<Q3B5x", NXUSB_MAGIC, NXUSB_VERSION_MAJOR, NXUSB_VERSION_MINOR, NXUSB_VERSION_PATCH)
@@ -129,7 +154,7 @@ class usb_tool:
 			print("Handshake error ~ {}".format(e))
 			return False
 
-	# Find the switch
+	# Find a ready switch, returns usb device
 	def find_switch(self, silent = False):
 		if not silent:
 			print("Searcing for Nintendo Switch (VendorID: {}, ProductID: {}".format(str(SWITCH_VENDOR_ID), str(SWITCH_PRODUCT_ID)))
@@ -156,6 +181,7 @@ class usb_tool:
 			print("Failed to find switch")
 			return False
 
+	#Pass device config, get endpoints in tuple
 	def get_endpoints(self, cfg):
 		print("Getting endpoints")
 		print("==============================================================")
@@ -178,14 +204,15 @@ class usb_tool:
 		print("Received USB exit command...")
 		self._exit()
 
+	#Test ping
 	def ping(self, size):
 		return UsbReturnCode.UsbReturnCode_Success.value
 
+	#Works
 	def OpenFile(self, size):
 		io_in = self.readUSB(size)
 		if io_in:
-			print(io_in)
-			path_to_open = struct.unpack('<{}s'.format(size), io_in[0x0:size])[0]
+			path_to_open = unpack_string(size, io_in)
 			print("Path: {}".format(path_to_open))
 
 			status = UsbReturnCode.UsbReturnCode_Success.value
@@ -207,7 +234,6 @@ class usb_tool:
 			read_offset = struct.unpack('<Q'.format(size), io_in[0x8:0x10])[0]
 			print("Read size {}".format(read_size))
 			print("Read read_offset {}".format(read_offset))
-			status = UsbReturnCode.UsbReturnCode_Success.value
 
 			with open(self.open_file, "rb") as open_file:
 				try:
@@ -255,6 +281,9 @@ class usb_tool:
 		return status
 
 	def CloseFile(self, size = None):
+		if size:
+			print("CloseFile command passed unexpected data")
+			raise
 		if self.open_file:
 			self.open_file = None
 			status = UsbReturnCode.UsbReturnCode_Success.value
@@ -262,10 +291,10 @@ class usb_tool:
 			status = UsbReturnCode.UsbReturnCode_FileNotOpen.value
 		return status
 
+	#Tested, works.
 	def TouchFile(self, size):
 		io_in = self.readUSB(size)
-		print(io_in)
-		path_to_open = struct.unpack('<{}s'.format(size), io_in[0x0:size])[0]
+		path_to_open = unpack_string(size, io_in)
 		print("Path: {}".format(path_to_open))
 
 		status = UsbReturnCode.UsbReturnCode_Success.value
@@ -274,12 +303,12 @@ class usb_tool:
 				if os.path.isdir(path_to_open):
 					status = UsbReturnCode.UsbReturnCode_FailedTouchFile.value
 				elif os.path.isfile(path_to_open):
-					pass
+					pass #If it's already a valid file use normal return code
 				else:
 					raise
 			else:
 				with open(path_to_open, "w+"):
-					pass
+					pass #If it's not a valid file, make the file and use normal return code
 		except Exception as e:
 			try:
 				print("Failed to touch file {}".format(path_to_open, e))
@@ -289,22 +318,25 @@ class usb_tool:
 
 		return status
 
+	#Tested, works.
 	def DeleteFile(self, size):
 		io_in = self.readUSB(size)
-		print(io_in)
-		path_to_open = struct.unpack('<{}s'.format(size), io_in[0x0:size])[0]
-		print("Path: {}".format(path_to_open))
+		if io_in:
+			path_to_open = unpack_string(size, io_in)
+			print("Path: {}".format(path_to_open))
 
-		status = UsbReturnCode.UsbReturnCode_Success.value
+			status = UsbReturnCode.UsbReturnCode_Success.value
 
-		if os.path.exists(path_to_open):
-			if os.path.isdir(path_to_open):
-				status = UsbReturnCode.UsbReturnCode_FailedDeleteFile.value
-			elif os.path.isfile(path_to_open):
-				print("Removing {}".format(Path))
-				os.remove(path_to_open)
+			if os.path.exists(path_to_open):
+				if os.path.isdir(path_to_open):
+					status = UsbReturnCode.UsbReturnCode_FailedDeleteFile.value
+				elif os.path.isfile(path_to_open):
+					print("Removing {}".format(Path))
+					os.remove(path_to_open)
+				else:
+					raise
 			else:
-				raise
+				status = UsbReturnCode.UsbReturnCode_FailedDeleteFile.value
 		else:
 			status = UsbReturnCode.UsbReturnCode_FailedDeleteFile.value
 
@@ -314,7 +346,7 @@ class usb_tool:
 	def RenameFile(self, size):
 		pass
 		# io_in = self.readUSB(size)
-		# print(io_in)
+		# 
 		# size_1 = struct.unpack('<Q', io_in[0x0:0x8])[0]
 		# print("Size_1: {}".format(size_1))
 		# size_2 = struct.unpack('<Q', io_in[0x8:0x10])[0]
@@ -324,30 +356,31 @@ class usb_tool:
 		# print("Filename_1: {}, Filename_2: {}".format(string_1, string_2))
 		# return UsbReturnCode.UsbReturnCode_Success.value
 
-	#Returns 0x0 on fail
+	#Returns 0x0 on fail, not tested
 	def GetFileSize(self, size):
 		io_in = self.readUSB(size)
-		print(io_in)
-		path_to_open = struct.unpack('<{}s'.format(size), io_in[0x0:size])[0]
-		print("Path: {}".format(path_to_open))
+		if io_in:
+			path_to_open = unpack_string(size, io_in)
+			print("Path: {}".format(path_to_open))
 
-		try:
-			if os.path.exists(path_to_open):
-				if os.path.isdir(path_to_open):
-					status = UsbReturnCode.UsbReturnCode_FailedToGetFileSize.value
-				elif os.path.isfile(path_to_open):
-					filesize = os.path.getsize(path_to_open)
-				else:
-					raise
-			else:
-				filesize = 0x0
-		except Exception as e:
 			try:
-				print("Failed to get file size {} ~ {}".format(path_to_open, e))
-			except:
-				print("Failed to get file size!! ~ {}".format(e))
+				if os.path.exists(path_to_open):
+					if os.path.isdir(path_to_open):
+						filesize = 0x0
+					elif os.path.isfile(path_to_open):
+						filesize = os.path.getsize(path_to_open)
+					else:
+						raise
+				else:
+					filesize = 0x0
+			except Exception as e:
+				try:
+					print("Failed to get file size {} ~ {}".format(path_to_open, e))
+				except:
+					print("Failed to get file size!! ~ {}".format(e))
+				filesize = 0x0
+		else:
 			filesize = 0x0
-
 		outstruct = struct.pack('<Q', filesize)
 		self.writeUSB(outstruct)
 		return -1 #Prevents the sending of the usb return code
@@ -355,28 +388,27 @@ class usb_tool:
 	def OpenDir(self, size):
 		io_in = self.readUSB(size)
 		if io_in:
-			print(io_in)
-			path_to_open = struct.unpack('<{}s'.format(size), io_in[0x0:size])[0]
+			path_to_open  = unpack_string(size, io_in)
+			status = UsbReturnCode.UsbReturnCode_Success.value
 
-		status = UsbReturnCode.UsbReturnCode_Success.value
-
-		try:
-			if os.path.exists(path_to_open):
-				if os.path.isdir(path_to_open):
-					os.chdir(path)
-				elif os.path.isfile(path_to_open):
-					status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
-				else:
-					raise
-			else:
-				status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
-		except Exception as e:
 			try:
-				print("Failed to open dir {} ~ {}".format(path_to_open, e))
-			except:
-				print("Failed to open dir! ~ {}".format(e))
-			status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
-
+				if os.path.exists(path_to_open):
+					if os.path.isdir(path_to_open):
+						os.chdir(path)
+					elif os.path.isfile(path_to_open):
+						status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+					else:
+						raise
+				else:
+					status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+			except Exception as e:
+				try:
+					print("Failed to open dir {} ~ {}".format(path_to_open, e))
+				except:
+					print("Failed to open dir! ~ {}".format(e))
+				status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+		else:
+			status UsbReturnCode.UsbReturnCode_PollError.value
 		return status
 
 	def ReadDir(self, size):
@@ -385,8 +417,8 @@ class usb_tool:
 	def DeleteDir(self, size):
 		io_in = self.readUSB(size)
 		if io_in:
-			print(io_in)
-			path_to_open = _get_string_from_data(io_in, size)
+			
+			path_to_open = unpack_string(io_in, size)
 
 		status = UsbReturnCode.UsbReturnCode_Success.value
 
@@ -448,13 +480,11 @@ class usb_tool:
 		except usb.core.USBError as e:
 			print("Error polling USB (Device disconnnected?) reinitializing...")
 			return
-		print(io_in)
+		
 		mode = struct.unpack('<B', io_in[0x0:0x1])[0]
 		padding = struct.unpack('<7?', io_in[0x1:0x8])[0]
 		size = struct.unpack('<Q', io_in[0x8:0x10])[0]
-
 		print("Mode: {}, Size: {}".format(mode, size))
-
 		print("Received Command {}".format(UsbMode(mode)))
 
 		try:
@@ -485,21 +515,11 @@ class usb_tool:
 	def get_cwd(self):
 		pass
 
-
-
-
-
-
-
-
-
-
-def _get_string_from_data(data, size):
+def unpack_string(data, size):
 	try:
 		return struct.unpack('<{}s'.format(size), data[0x0:size])[0]
 	except Exception as e:
 		print("Error unpacking data to string.\n     Data: {}\n     Size: {}\n     Error: {}".format(data, size, e))
-
 
 def _get_endpoint(direction, cfg):
 	is_ep = lambda ep: usb.util.endpoint_direction(ep.bEndpointAddress) == direction

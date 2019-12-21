@@ -52,6 +52,8 @@ class UsbReturnCode(Enum):
 	UsbReturnCode_FailedRenameDir       = 0x31
 	UsbReturnCode_FailedDeleteDir       = 0x32
 
+	UsbReturnCode_Failure				= 0xff
+
 class USBFileExtentionType(Enum):
 	USBFileExtentionType_None   = 0x0
 	USBFileExtentionType_Ignore = 0x1
