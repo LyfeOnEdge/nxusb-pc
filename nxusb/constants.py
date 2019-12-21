@@ -31,6 +31,8 @@ class UsbMode(Enum):
 	UsbMode_ReadDevices             = 0x41
 	UsbMode_GetTotalDevices         = 0x42
 
+	UsbMode_GetWebDownload			= 0x50
+
 class UsbReturnCode(Enum):
 	UsbReturnCode_Success               = 0x0
 
