@@ -11,6 +11,15 @@ NXUSB_VERSION_MAJOR = 0
 NXUSB_VERSION_MINOR = 0
 NXUSB_VERSION_PATCH = 1
 
+class unpackError(BaseException):
+	pass
+class overlapError(BaseException):
+	pass
+class usbError(BaseException):
+	pass
+class fileError(BaseException):
+	pass
+
 class usb_tool:
 	def __init__(self):
 		self.dev = None
@@ -47,6 +56,17 @@ class usb_tool:
 			UsbMode.UsbMode_GetWebDownload.value : self.GetWebDownload,
 		}
 
+	def addUSBcommand(self, value, callback):
+		if not value in self.UsbModeMap.keys():
+			self.UsbModeMap[value] = callback
+		else:
+			print("Error adding usb command, value overlap")
+			raise overlapError
+
+	def addUSBcommands(self, command_list):
+		for value, callback in command_list:
+			self.addUSBcommand(value, callback)
+
 	#Tested
 	def init(self):
 		print("Starting Switch connection")
@@ -80,10 +100,106 @@ class usb_tool:
 			print("Can't init switch connection")
 			return False
 
+	#-------------------------------
+	#Handshake struct:
+	#The first 8 bytes are magic [0x4E58555342]
+	#Then 3 bytes for the version [Macro, micro, major]
+	#Then 5 bytes of padding
+	#----------------------------
+	#Handshake protocol
+	#The switch writes a handshake struct of length 0x10
+	#The pc writes a success code
+	#The pc writes a handshake struct
+	def attempt_handshake(self):
+		try:
+			io_in = self.in_ep.read(0x10, timeout=0)
+			magic = unpack_unsigned_long_long(io_in[0x0:0x8])
+			if not magic == NXUSB_MAGIC:
+				print("Invalid USB Magic")
+				return False
+
+			status = None
+			try:
+				macro = struct.unpack('<B', io_in[0x8:0x9])[0]
+				minor = struct.unpack('<B', io_in[0x9:0xA])[0]
+				major = struct.unpack('<B', io_in[0xA:0xB])[0]
+			except Exception as e:
+				print("Handshake unpack error: {}".format(e))
+				return False
+			self.writeUSBReturnSuccess()
+
+			outstruct = struct.pack("<Q3B5x", NXUSB_MAGIC, NXUSB_VERSION_MAJOR, NXUSB_VERSION_MINOR, NXUSB_VERSION_PATCH)
+			self.dev.write(endpoint = self.out_ep, data = outstruct, timeout = 1000)
+
+			print("Handshake successful, switch client version {}.{}.{}".format(major, minor, macro))
+			return True
+
+		except Exception as e:
+			print("Handshake error ~ {}".format(e))
+			return False
+
+	#Call when app is ready
 	def mainloop(self):
 		while True:
-    		self.mode_poll()
+			self.mode_poll()
 
+
+#Utility functions
+	# Find a ready switch, returns usb device
+	def find_switch(self, silent = False):
+		if not silent:
+			print("Searcing for Nintendo Switch (VendorID: {}, ProductID: {}".format(str(SWITCH_VENDOR_ID), str(SWITCH_PRODUCT_ID)))
+		return usb.core.find(idVendor=SWITCH_VENDOR_ID, idProduct=SWITCH_PRODUCT_ID)
+
+	# Wait for the switch to connect, set a timeout or wait indefinitely
+	# Silent mutes the find function but doesn't mute printouts
+	# True if found | False if not found
+	def wait_for_switch_to_connect(self, timeout = None, silent = False):
+		dev = None
+		# loop until switch is found.
+		starttime = timer()
+		while (dev is None):
+			if timeout:
+				if (timer() > (starttime + timeout)):
+					print("Switch connection timeout exceeded")
+					break
+			dev = self.find_switch(silent = silent)
+		self.dev = dev
+		if dev:
+			print("Found switch")
+			return True
+		else:
+			print("Failed to find switch")
+			return False
+
+	#Pass device config, get endpoints in tuple
+	def get_endpoints(self, cfg):
+		print("Getting endpoints")
+		print("==============================================================")
+
+		in_ep = _get_in_endpoint(cfg)
+		print("In:")
+		print(in_ep)
+
+		out_ep = _get_out_endpoint(cfg)
+		print("Out:")
+		print(out_ep)
+
+		print("==============================================================")
+		assert in_ep is not None
+		assert out_ep is not None
+		return(in_ep, out_ep)
+
+	#Finished
+	def exit(self, size=None, data = None):
+		print("Received USB exit command...")
+		self._exit()
+
+	def _exit(self):
+		sys.exit("Exiting...")
+
+
+#Read and write functions
 	def readUSB(self, length):
 		if length:
 			try:
@@ -141,7 +257,7 @@ class usb_tool:
 
 				buf = f.read(read_size)
 				if not self.writeUSB(buf):
-					raise
+					raise usbError
 				curr_off += read_size
 				print("reading {} - {}".format(curr_off, end_off))
 
@@ -150,94 +266,8 @@ class usb_tool:
 			print("Error writing file to usb range_size: {}, range_offset {}".format(range_size, range_offset))
 			return False
 
-	#-------------------------------
-	#Handshake struct:
-	#The first 8 bytes are magic [0x4E58555342]
-	#Then 3 bytes for the version [Macro, micro, major]
-	#Then 5 bytes of padding
-	#----------------------------
-	#Handshake protocol
-	#The switch writes a handshake struct of length 0x10
-	#The pc writes a success code
-	#The pc writes a handshake struct
-	def attempt_handshake(self):
-		try:
-			io_in = self.in_ep.read(0x10, timeout=0)
-			magic = unpack_unsigned_long_long(io_in[0x0:0x8])
-			if not magic == NXUSB_MAGIC:
-				print("Invalid USB Magic")
-				return False
 
-			status = None
-			try:
-				macro = struct.unpack('<B', io_in[0x8:0x9])[0]
-				minor = struct.unpack('<B', io_in[0x9:0xA])[0]
-				major = struct.unpack('<B', io_in[0xA:0xB])[0]
-			except Exception as e:
-				print("Handshake unpack error: {}".format(e))
-				return False
-			self.writeUSBReturnSuccess()
-
-			outstruct = struct.pack("<Q3B5x", NXUSB_MAGIC, NXUSB_VERSION_MAJOR, NXUSB_VERSION_MINOR, NXUSB_VERSION_PATCH)
-			self.dev.write(endpoint = self.out_ep, data = outstruct, timeout = 1000)
-
-			print("Handshake successful, switch client version {}.{}.{}".format(major, minor, macro))
-			return True
-
-		except Exception as e:
-			print("Handshake error ~ {}".format(e))
-			return False
-
-	# Find a ready switch, returns usb device
-	def find_switch(self, silent = False):
-		if not silent:
-			print("Searcing for Nintendo Switch (VendorID: {}, ProductID: {}".format(str(SWITCH_VENDOR_ID), str(SWITCH_PRODUCT_ID)))
-		return usb.core.find(idVendor=SWITCH_VENDOR_ID, idProduct=SWITCH_PRODUCT_ID)
-
-	# Wait for the switch to connect, set a timeout or wait indefinitely
-	# Silent mutes the find function but doesn't mute printouts
-	# True if found | False if not found
-	def wait_for_switch_to_connect(self, timeout = None, silent = False):
-		dev = None
-		# loop until switch is found.
-		starttime = timer()
-		while (dev is None):
-			if timeout:
-				if (timer() > (starttime + timeout)):
-					print("Switch connection timeout exceeded")
-					break
-			dev = self.find_switch(silent = silent)
-		self.dev = dev
-		if dev:
-			print("Found switch")
-			return True
-		else:
-			print("Failed to find switch")
-			return False
-
-	#Pass device config, get endpoints in tuple
-	def get_endpoints(self, cfg):
-		print("Getting endpoints")
-		print("==============================================================")
-
-		in_ep = _get_in_endpoint(cfg)
-		print("In:")
-		print(in_ep)
-
-		out_ep = _get_out_endpoint(cfg)
-		print("Out:")
-		print(out_ep)
-
-		print("==============================================================")
-		assert in_ep is not None
-		assert out_ep is not None
-		return(in_ep, out_ep)
-
-	#Finished
-	def exit(self, size=None, data = None):
-		print("Received USB exit command...")
-		self._exit()
-
+#Usb Commands
 	#Test ping
 	def ping(self, size):
 		return UsbReturnCode.UsbReturnCode_Success.value
@@ -320,7 +350,7 @@ class usb_tool:
 	def CloseFile(self, size, io_in):
 		if size:
 			print("CloseFile command passed unexpected data")
-			raise
+			raise fileError
 		if self.open_file:
 			self.open_file = None
 			status = UsbReturnCode.UsbReturnCode_Success.value
@@ -341,7 +371,7 @@ class usb_tool:
 					elif os.path.isfile(path_to_open):
 						status = UsbReturnCode.UsbReturnCode_Success.value #If it's already a valid file use normal return code
 					else:
-						raise
+						raise fileError
 				else:
 					with open(path_to_open, "w+"):
 						status = UsbReturnCode.UsbReturnCode_Success.value #If it's not a valid file, make the file and use normal return code
@@ -369,7 +399,7 @@ class usb_tool:
 					os.remove(path_to_open)
 					status = UsbReturnCode.UsbReturnCode_Success.value
 				else:
-					raise
+					raise fileError
 			else:
 				status = UsbReturnCode.UsbReturnCode_FailedDeleteFile.value
 		else:
@@ -410,7 +440,7 @@ class usb_tool:
 					elif os.path.isfile(path_to_open):
 						filesize = os.path.getsize(path_to_open)
 					else:
-						raise
+						raise fileError
 				else:
 					filesize = 0x0
 			except Exception as e:
@@ -470,7 +500,7 @@ class usb_tool:
 					elif os.path.isfile(path_to_open):
 						status = UsbReturnCode.UsbReturnCode_FailedDeleteDir.value
 					else:
-						raise
+						raise fileError
 				else:
 					status = UsbReturnCode.UsbReturnCode_FailedDeleteDir.value
 			except Exception as e:
@@ -554,7 +584,7 @@ class usb_tool:
 		if io_in:
 			try:
 				mode = unpack_byte(io_in[0x0:0x1])
-				padding = struct.unpack('<7x', io_in[0x1:0x8])[0]
+				padding = struct.unpack('<7?', io_in[0x1:0x8])[0]
 				size = unpack_unsigned_long_long(io_in[0x8:0x10])
 				print("Mode: {}, Size: {}".format(mode, size))
 				print("Received Command {}".format(UsbMode(mode)))
@@ -563,7 +593,7 @@ class usb_tool:
 				return
 		else:
 			print("Empty command received.")
-			return
+			raise usbError
 
 		try:
 			function = self.UsbModeMap[mode]
@@ -579,18 +609,13 @@ class usb_tool:
 		if not result == -1:
 			self.writeUSBReturnCode(result)
 
-	def _exit(self):
-		sys.exit("Exiting...")
-
-	def get_cwd(self):
-		pass
 
 def unpack_unsigned_long_long(data):
 	try:
 		return struct.unpack('<Q', data)[0]
 	except Exception as e:
 		print("Error unpacking data to unsigned long long.\n     Data: {}\n     Error: {}".format(data, e))
-
+		raise unpackError
 def unpack_string(data, size = None):
 	try:
 		data = struct.unpack('<{}s'.format(size), data[0x0:size])[0]
@@ -611,3 +636,5 @@ def _get_out_endpoint(cfg):
 
 def _get_in_endpoint(cfg):
 	return _get_endpoint(usb.util.ENDPOINT_IN, cfg)
+
+
