@@ -79,13 +79,25 @@ class usb_tool:
 
 	def readUSB(self, length):
 		if length:
-			return self.in_ep.read(length, timeout=0)
+			try:
+				return self.in_ep.read(length, timeout=0)
+			except Exception as e:
+				print("Error reading USB ~ {}".format(e))
+		else:
+			print("Error reading USB. No read length.")
 
 	def writeUSB(self, outstruct):
-		if outstruct:
-			self.dev.write(endpoint = self.out_ep, data = outstruct, timeout = 1000)
+		try:
+			if outstruct:
+				self.dev.write(endpoint = self.out_ep, data = outstruct, timeout = 1000)
+			else:
+				print("Error writing to USB. Data is None.")
+		except Exception as e:
+			print("Error writing to USB ~ {}".format(e))
 
 	def writeUSBReturnCode(self, code):
+		if code is None:
+			print("Error writing USB return code. Return code is None.")
 		outstruct = struct.pack("<l", code)
 		print("Writing USBReturnCode {}".format(UsbReturnCode(code)))
 		self.writeUSB(outstruct)
@@ -157,6 +169,8 @@ class usb_tool:
 		print(out_ep)
 
 		print("==============================================================")
+		assert in_ep is not None
+		assert out_ep is not None
 		return(in_ep, out_ep)
 
 	#Finished
@@ -372,7 +386,7 @@ class usb_tool:
 		io_in = self.readUSB(size)
 		if io_in:
 			print(io_in)
-			path_to_open = struct.unpack('<{}s'.format(size), io_in[0x0:size])[0]
+			path_to_open = _get_string_from_data(io_in, size)
 
 		status = UsbReturnCode.UsbReturnCode_Success.value
 
@@ -413,6 +427,7 @@ class usb_tool:
 		pass
 
 	def TouchDir(self, size):
+
 		pass
 
 	def OpenDevice(self, size):
@@ -479,6 +494,11 @@ class usb_tool:
 
 
 
+def _get_string_from_data(data, size):
+	try:
+		return struct.unpack('<{}s'.format(size), data[0x0:size])[0]
+	except Exception as e:
+		print("Error unpacking data to string.\n     Data: {}\n     Size: {}\n     Error: {}".format(data, size, e))
 
 
 def _get_endpoint(direction, cfg):
@@ -490,6 +510,3 @@ def _get_out_endpoint(cfg):
 
 def _get_in_endpoint(cfg):
 	return _get_endpoint(usb.util.ENDPOINT_IN, cfg)
-
-def unpack_string(struct, length):
-	pass
