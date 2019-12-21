@@ -324,16 +324,17 @@ class usb_tool:
 
 		return -1
 
-	#Not tested
+	#Working
 	def WriteFile(self, size, io_in):
 		if io_in:
 			write_size = unpack_unsigned_long_long(io_in[0x0:0x8])
 			write_offset = unpack_unsigned_long_long(io_in[0x8:0x10])
 			data_in = self.readUSB(write_size)
+			data_in = unpack_string(data_in, write_size)
 
-			with open(self.open_file, "w") as open_file:
+			with open(self.open_file, "wb") as open_file:
 				try:
-					open_file.seek(read_offset)
+					open_file.seek(write_offset)
 					open_file.write(data_in)
 					status = UsbReturnCode.UsbReturnCode_Success.value
 				except Exception as e:
@@ -636,5 +637,3 @@ def _get_out_endpoint(cfg):
 
 def _get_in_endpoint(cfg):
 	return _get_endpoint(usb.util.ENDPOINT_IN, cfg)
-
-
