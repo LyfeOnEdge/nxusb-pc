@@ -89,7 +89,7 @@ class usb_tool:
 
 				if not self.attempt_handshake():
 					print("Handshake failed")
-					return
+					return False
 
 				self.is_connected = True
 				return True
@@ -118,18 +118,17 @@ class usb_tool:
 				print("Invalid USB Magic")
 				return False
 
-			status = None
 			try:
-				macro = struct.unpack('<B', io_in[0x8:0x9])[0]
-				minor = struct.unpack('<B', io_in[0x9:0xA])[0]
-				major = struct.unpack('<B', io_in[0xA:0xB])[0]
+				macro = unpack_byte(io_in[0x8:0x9])
+				minor = unpack_byte(io_in[0x9:0xA])
+				major = unpack_byte(io_in[0xA:0xB])
 			except Exception as e:
 				print("Handshake unpack error: {}".format(e))
 				return False
 			self.writeUSBReturnSuccess()
 
 			outstruct = struct.pack("<Q3B5x", NXUSB_MAGIC, NXUSB_VERSION_MAJOR, NXUSB_VERSION_MINOR, NXUSB_VERSION_PATCH)
-			self.dev.write(endpoint = self.out_ep, data = outstruct, timeout = 1000)
+			self.writeUSB(outstruct)
 
 			print("Handshake successful, switch client version {}.{}.{}".format(major, minor, macro))
 			return True
@@ -227,6 +226,7 @@ class usb_tool:
 	def writeUSBReturnCode(self, code):
 		if code is None:
 			print("Error writing USB return code. Return code is None.")
+			raise usbError
 		outstruct = struct.pack("<l", code)
 		print("Writing USBReturnCode {}".format(UsbReturnCode(code)))
 		return self.writeUSB(outstruct)
