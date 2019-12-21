@@ -83,10 +83,11 @@ class usb_tool:
 	def readUSB(self, length):
 		if length:
 			try:
-				return self.in_ep.read(length, timeout=0)
+				data = self.in_ep.read(length, timeout=0)
+				print("Received data - {}".format(data))
+				return data
 			except Exception as e:
 				print("Error reading USB ~ {}".format(e))
-				return None
 		else:
 			print("Error reading USB. Null length.")
 			return False
@@ -129,7 +130,7 @@ class usb_tool:
 	def attempt_handshake(self):
 		try:
 			io_in = self.in_ep.read(0x10, timeout=0)
-			magic = struct.unpack('<Q', io_in[0x0:0x8])[0]
+			magic = unpack_unsigned_long_long(io_in[0x0:0x8])
 			if not magic == NXUSB_MAGIC:
 				print("Invalid USB Magic")
 				return False
@@ -230,8 +231,8 @@ class usb_tool:
 	def ReadFile(self, size):
 		io_in = self.readUSB(size)
 		if io_in:
-			read_size = struct.unpack('<Q'.format(size), io_in[0x0:0x8])[0]
-			read_offset = struct.unpack('<Q'.format(size), io_in[0x8:0x10])[0]
+			read_size = unpack_unsigned_long_long(io_in[0x0:0x8])
+			read_offset = unpack_unsigned_long_long(io_in[0x8:0x10])
 			print("Read size {}".format(read_size))
 			print("Read read_offset {}".format(read_offset))
 
@@ -260,8 +261,8 @@ class usb_tool:
 	def WriteFile(self, size):
 		io_in = self.readUSB(size)
 		if io_in:
-			write_size = struct.unpack('<Q'.format(size), io_in[0x0:0x8])[0]
-			write_offset = struct.unpack('<Q'.format(size), io_in[0x8:0x10])[0]
+			write_size = unpack_unsigned_long_long(io_in[0x0:0x8])
+			write_offset = unpack_unsigned_long_long(io_in[0x8:0x10])
 			data_in = self.readUSB(write_size)
 			bytes_in = struct.unpack('<{}b'.format(write_size))
 
@@ -347,9 +348,9 @@ class usb_tool:
 		pass
 		# io_in = self.readUSB(size)
 		# 
-		# size_1 = struct.unpack('<Q', io_in[0x0:0x8])[0]
+		# size_1 = struct.unpack('<Q', io_in[0x0:0x8])
 		# print("Size_1: {}".format(size_1))
-		# size_2 = struct.unpack('<Q', io_in[0x8:0x10])[0]
+		# size_2 = struct.unpack('<Q', io_in[0x8:0x10])
 		# print("Size_2: {}".format(size_2))
 		# string_1 = struct.unpack('<{}s'.format(size_1), io_in[0x10:0x10+size_1])[0]
 		# string_2 = struct.unpack('<{}s'.format(size_2), io_in[0x10+size_1:0x10+size_1+size_2])[0]
@@ -483,7 +484,7 @@ class usb_tool:
 		
 		mode = struct.unpack('<B', io_in[0x0:0x1])[0]
 		padding = struct.unpack('<7?', io_in[0x1:0x8])[0]
-		size = struct.unpack('<Q', io_in[0x8:0x10])[0]
+		size = unpack_unsigned_long_long(io_in[0x8:0x10])
 		print("Mode: {}, Size: {}".format(mode, size))
 		print("Received Command {}".format(UsbMode(mode)))
 
@@ -511,9 +512,14 @@ class usb_tool:
 	def _exit(self):
 		sys.exit("Exiting...")
 
-
 	def get_cwd(self):
 		pass
+
+def unpack_unsigned_long_long(data):
+	try:
+		return struct.unpack('<Q', data)[0]
+	except Exception as e:
+		print("Error unpacking data to string.\n     Data: {}\n     Size: {}\n     Error: {}".format(data, size, e))
 
 def unpack_string(data, size):
 	try:
