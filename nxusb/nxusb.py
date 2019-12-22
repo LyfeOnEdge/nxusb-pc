@@ -12,13 +12,15 @@ NXUSB_VERSION_MINOR = 0
 NXUSB_VERSION_PATCH = 1
 
 class unpackError(BaseException):
-	pass
+	pass #Raised when there is an issue unpacking usb data
 class overlapError(BaseException):
-	pass
+	pass #Raised when usb command values overlap
 class usbError(BaseException):
-	pass
+	pass #Raised when there is an issue with reading or writing usb
 class fileError(BaseException):
-	pass
+	pass #Raised whene there is an issue with interacting with a file
+class notImplemented(BaseException):
+	pass #Raised when an unimplemented method is called
 
 class usb_tool:
 	def __init__(self):
@@ -27,6 +29,7 @@ class usb_tool:
 		self.in_ep = None
 		self.is_connected = False
 		self.open_file = None
+		self.cwd = None
 
 		self.UsbModeMap = {
 			UsbMode.UsbMode_Exit.value : self.exit,
@@ -197,24 +200,26 @@ class usb_tool:
 	def _exit(self):
 		sys.exit("Exiting...")
 
-
 #Read and write functions
-	def readUSB(self, length):
+	def readUSB(self, length, timeout = 0):
 		if length:
 			try:
-				data = self.in_ep.read(length, timeout=0)
+				data = self.in_ep.read(length, timeout = timeout)
 				print("Received data - {}".format(data))
 				return data
 			except Exception as e:
 				print("Error reading USB ~ {}".format(e))
 		else:
 			return False
+		
+	def readUSBRaw(self, length, timeout = 0):
+        return self.in_ep.read(length, timeout = timeout).tobytes()
 
 	#Returns True if successful
-	def writeUSB(self, outstruct):
+	def writeUSB(self, outstruct, timeout = 1000):
 		try:
 			if outstruct:
-				self.dev.write(endpoint = self.out_ep, data = outstruct, timeout = 1000)
+				self.dev.write(endpoint = self.out_ep, data = outstruct, timeout = timeout)
 				return True
 			else:
 				pass
@@ -332,11 +337,12 @@ class usb_tool:
 			data_in = self.readUSB(write_size)
 			data_in = unpack_string(data_in, write_size)
 
+			status = -1
 			with open(self.open_file, "wb") as open_file:
 				try:
 					open_file.seek(write_offset)
 					open_file.write(data_in)
-					status = UsbReturnCode.UsbReturnCode_Success.value
+					print("Wrote {} to file {}".format(data_in, self.open_file))
 				except Exception as e:
 					try:
 						print("Error writing to file {} ~ {}".format(path_to_open, e))
@@ -396,7 +402,7 @@ class usb_tool:
 				if os.path.isdir(path_to_open):
 					status = UsbReturnCode.UsbReturnCode_FailedDeleteFile.value
 				elif os.path.isfile(path_to_open):
-					print("Removing {}".format(Path))
+					print("Removing {}".format(path_to_open))
 					os.remove(path_to_open)
 					status = UsbReturnCode.UsbReturnCode_Success.value
 				else:
@@ -408,25 +414,27 @@ class usb_tool:
 
 		return status
 
-	#IDK what I'm doing wrong
+	#IDK what I'm doing wrong. I can't figure out how to decode the sent bytes.
 	def RenameFile(self, size, io_in):
-		if io_in:
-			try:
-				size_1 = unpack_unsigned_long_long(io_in[0x0:0x8])
-				print("Size_1: {}".format(size_1))
-				size_2 = unpack_unsigned_long_long(io_in[0x8:0x10])
-				print("Size_2: {}".format(size_2))
-				string_1 = unpack_string(io_in[0x10:0x10+size_1], size_1)
-				string_2 = unpack_string(io_in[0x10+size_1:0x10+size_1+size_2], size_2)
-				print("Filename_1: {}, Filename_2: {}".format(string_1, string_2))
-				status = UsbReturnCode.UsbReturnCode_Success.value
-			except Exception as e:
-				print("Error unpacking file rename strings / sizes {}".format(e))
-				status = UsbReturnCode.UsbReturnCode_FailedRenameFile.value
-		else:
-			status = UsbReturnCode.UsbReturnCode_FailedRenameFile.value
+		pass
+		# if io_in:
+		# 	try:
+		# 		size_1 = unpack_unsigned_long_long(io_in[0x0:0x8])
+		# 		print("Size_1: {}".format(size_1))
+		# 		size_2 = unpack_unsigned_long_long(io_in[0x8:0x10])
+		# 		print("Size_2: {}".format(size_2))
+		# 		string_1 = unpack_string(io_in[0x10:0x10 + size_1], size_1)
+		# 		# string_2 = io_in[0x10+size_1:0x10+size_1+size_2].tobytes().decode('utf-8')'
+		# 		string_2 = "test"
+		# 		print("Filename_1: {}, Filename_2: {}".format(string_1, string_2))
+		# 		status = UsbReturnCode.UsbReturnCode_Success.value
+		# 	except Exception as e:
+		# 		print("Error unpacking file rename strings / sizes ~ {}".format(e))
+		# 		status = UsbReturnCode.UsbReturnCode_FailedRenameFile.value
+		# else:
+		# 	status = UsbReturnCode.UsbReturnCode_FailedRenameFile.value
 
-		return status
+		# return status
 
 	#Returns 0x0 on fail, not tested
 	def GetFileSize(self, size, io_in):
@@ -457,33 +465,62 @@ class usb_tool:
 		return -1 #Prevents the sending of the usb return code
 
 	def OpenDir(self, size, io_in):
-		pass
-		# if io_in:
-		# 	path_to_open  = unpack_string(size, io_in)
-			
-		# 	try:
-		# 		if os.path.exists(path_to_open):
-		# 			if os.path.isdir(path_to_open):
-		# 				os.chdir(path)
-		# 			elif os.path.isfile(path_to_open):
-		# 				status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
-		# 			else:
-		# 				raise
-		# 		else:
-		# 			status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
-		# 	except Exception as e:
-		# 		try:
-		# 			print("Failed to open dir {} ~ {}".format(path_to_open, e))
-		# 		except:
-		# 			print("Failed to open dir! ~ {}".format(e))
-		# 		status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
-		# else:
-		# 	status = UsbReturnCode.UsbReturnCode_PollError.value
+		if io_in:
+			path_to_open = unpack_string(size, io_in)
+
+			try:
+				if os.path.exists(path_to_open):
+					if os.path.isdir(path_to_open):
+						self.cwd = path_to_open
+						status = UsbReturnCode.UsbReturnCode_Success.value
+					elif os.path.isfile(path_to_open):
+						self.cwd = None
+						status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+					else:
+						self.cwd = None
+						raise fileError
+				else:
+					self.cwd = None
+					status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+			except Exception as e:
+				print("Failed to change working dir ~ {}".format(e))
+				status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+		else:
+			status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+
+		return status
 		
-		# return status
+	def ChangeDir(self, size, io_in):
+		if io_in:
+			path_to_open = unpack_string(size, io_in)
+			
+			try:
+				if os.path.exists(path_to_open):
+					if os.path.isdir(path_to_open):
+						os.chdir(path)
+					elif os.path.isfile(path_to_open):
+						status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+					else:
+						raise
+				else:
+					status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+			except Exception as e:
+				try:
+					print("Failed to open dir {} ~ {}".format(path_to_open, e))
+				except:
+					print("Failed to open dir! ~ {}".format(e))
+				status = UsbReturnCode.UsbReturnCode_FailedOpenDir.value
+		else:
+			status = UsbReturnCode.UsbReturnCode_PollError.value
+		
+		return status
+
 
 	def ReadDir(self, size, io_in):
-		pass
+		if io_in:
+			path_to_open = unpack_string(size, io_in)
+			print(path_to_open)
+			return UsbReturnCode.UsbReturnCode_Success.value
 
 	#Works
 	def _DeleteDir(self, size, io_in, recursive = False):
@@ -524,25 +561,53 @@ class usb_tool:
 		return self._DeleteDir(size, io_in, recursive = True)
 
 	def GetDirTotal(self, size, io_in):
-		pass
+		raise notImplemented
 
 	def GetDirTotalRecursively(self, size, io_in):
-		pass
+		raise notImplemented
 
 	def RenameDir(self, size, io_in):
-		pass
+		raise notImplemented
 
 	def TouchDir(self, size, io_in):
-		pass
+		if io_in:
+			path_to_open = unpack_string(io_in, size)
+			print("Path: {}".format(path_to_open))
+			try:
+				if os.path.exists(path_to_open):
+					if os.path.isdir(path_to_open):
+						status = UsbReturnCode.UsbReturnCode_Success.value
+					elif os.path.isfile(path_to_open):
+						status = UsbReturnCode.UsbReturnCode_FailedTouchDir.value
+					else:
+						raise fileError
+				else:
+					try:
+						os.mkdir(path_to_open)
+						status = UsbReturnCode.UsbReturnCode_Success.value 
+					except Exception as e:
+						print("Error making new dir {} ~ {}".format(path_to_open, e))
+						status = UsbReturnCode.UsbReturnCode_FailedTouchDir.value
+
+			except Exception as e:
+				try:
+					print("Failed to touch file {}".format(path_to_open, e))
+				except:
+					print("Failed to touch file!!")
+				status = UsbReturnCode.UsbReturnCode_FailedTouchDir.value
+		else:
+			status = UsbReturnCode.UsbReturnCode_FailedTouchDir.value
+
+		return status
 
 	def OpenDevice(self, size, io_in):
-		pass
+		raise notImplemented
 
 	def ReadDevices(self, size, io_in):
-		pass
+		raise notImplemented
 
 	def GetTotalDevices(self, size, io_in):
-		pass
+		raise notImplemented
 
 	def GetWebDownload(self, size, io_in):
 		if io_in:

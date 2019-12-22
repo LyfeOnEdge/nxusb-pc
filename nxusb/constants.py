@@ -53,6 +53,7 @@ class UsbReturnCode(Enum):
 	UsbReturnCode_FailedOpenDir         = 0x30
 	UsbReturnCode_FailedRenameDir       = 0x31
 	UsbReturnCode_FailedDeleteDir       = 0x32
+	UsbReturnCode_FailedTouchDir		= 0x33
 
 	UsbReturnCode_Failure				= 0xff
 
